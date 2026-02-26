@@ -559,7 +559,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 *@{username}*\n"
             f"━━━━━━━━━━━━━━\n"
             f"👥 Подписчики: {fmt_num(members)}\n"
-            f"👁 Средний охват: {fmt_num(avg_views)} ({len(views)} постов)\n"
+            f"👁 Средний охват: {fmt_num(avg_views)}\n"
             f"📈 ER: {er:.1f}% — {er_status}"
             f"{freq_text}\n"
             f"━━━━━━━━━━━━━━\n"
