@@ -4,14 +4,13 @@ import urllib.request
 import json
 import os
 import logging
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, timedelta
 
-# PostgreSQL support (if DATABASE_URL is set, use Postgres; otherwise SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-    import psycopg2
-    import psycopg2.extras
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set. PostgreSQL is required.")
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, PreCheckoutQueryHandler
@@ -53,7 +52,6 @@ def get_usd_rate() -> float:
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8649933614:AAFtSLs2sAyPzKiErNhmpIZeaP93XeKpX5I")
 ADMIN_ID = 587349420
-DB_PATH = os.getenv("DB_PATH", "/tmp/tganalyzer.db")
 STARS_PRICE = 99  # Telegram Stars for 30 days
 
 CPM_BY_NICHE = {
@@ -73,60 +71,38 @@ FREE_CHECKS_PER_DAY = 3
 # --- Database ---
 
 def get_conn():
-    if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL), "pg"
-    return sqlite3.connect(DB_PATH), "sqlite"
+    return psycopg2.connect(DATABASE_URL)
 
 def init_db():
-    conn, db = get_conn()
+    conn = get_conn()
     cur = conn.cursor()
-    if db == "pg":
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                user_id BIGINT PRIMARY KEY,
-                expires_at TIMESTAMP NOT NULL
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS daily_checks (
-                user_id BIGINT NOT NULL,
-                date TEXT NOT NULL,
-                count INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, date)
-            )
-        """)
-    else:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                user_id INTEGER PRIMARY KEY,
-                expires_at TEXT NOT NULL
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS daily_checks (
-                user_id INTEGER NOT NULL,
-                date TEXT NOT NULL,
-                count INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, date)
-            )
-        """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            user_id BIGINT PRIMARY KEY,
+            expires_at TIMESTAMP NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS daily_checks (
+            user_id BIGINT NOT NULL,
+            date TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, date)
+        )
+    """)
     conn.commit()
     conn.close()
-    logger.info(f"DB initialized: {'PostgreSQL' if DATABASE_URL else 'SQLite'}")
-    # Auto-grant permanent subscription to admin
+    logger.info("DB initialized: PostgreSQL")
+    # Auto-grant subscription to admin if expired/missing
     if not is_premium(ADMIN_ID):
         add_subscription(ADMIN_ID, days=3650)
         logger.info(f"Admin subscription auto-granted to {ADMIN_ID}")
 
 def is_premium(user_id: int) -> bool:
     try:
-        conn, db = get_conn()
+        conn = get_conn()
         cur = conn.cursor()
-        if db == "pg":
-            cur.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id = %s AND expires_at > NOW()", (user_id,))
-        else:
-            today = datetime.utcnow().isoformat()
-            cur.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id = ? AND expires_at > ?", (user_id, today))
+        cur.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id = %s AND expires_at > NOW()", (user_id,))
         count = cur.fetchone()[0]
         conn.close()
         return count > 0
@@ -135,28 +111,25 @@ def is_premium(user_id: int) -> bool:
         return False
 
 def add_subscription(user_id: int, days: int = 30):
-    conn, db = get_conn()
+    conn = get_conn()
     cur = conn.cursor()
     expires = (datetime.utcnow() + timedelta(days=days)).isoformat()
-    ph = "%s" if db == "pg" else "?"
-    if db == "pg":
-        cur.execute(f"INSERT INTO subscriptions (user_id, expires_at) VALUES ({ph},{ph}) ON CONFLICT(user_id) DO UPDATE SET expires_at = EXCLUDED.expires_at", (user_id, expires))
-    else:
-        cur.execute(f"INSERT OR REPLACE INTO subscriptions (user_id, expires_at) VALUES ({ph},{ph})", (user_id, expires))
+    cur.execute(
+        "INSERT INTO subscriptions (user_id, expires_at) VALUES (%s, %s) ON CONFLICT(user_id) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+        (user_id, expires)
+    )
     conn.commit()
     conn.close()
 
 def get_expiry(user_id: int):
-    conn, db = get_conn()
+    conn = get_conn()
     cur = conn.cursor()
-    ph = "%s" if db == "pg" else "?"
-    cur.execute(f"SELECT expires_at FROM subscriptions WHERE user_id = {ph}", (user_id,))
+    cur.execute("SELECT expires_at FROM subscriptions WHERE user_id = %s", (user_id,))
     row = cur.fetchone()
     conn.close()
     if not row:
         return None
-    val = row[0]
-    return str(val)[:10]  # YYYY-MM-DD
+    return str(row[0])[:10]  # YYYY-MM-DD
 
 # --- Helpers ---
 
@@ -230,27 +203,19 @@ def check_daily_limit(user_id: int) -> bool:
     if is_premium(user_id):
         return True
     today = datetime.now().strftime("%Y-%m-%d")
-    conn, db = get_conn()
+    conn = get_conn()
     cur = conn.cursor()
-    ph = "%s" if db == "pg" else "?"
-    cur.execute(f"SELECT count FROM daily_checks WHERE user_id = {ph} AND date = {ph}", (user_id, today))
+    cur.execute("SELECT count FROM daily_checks WHERE user_id = %s AND date = %s", (user_id, today))
     row = cur.fetchone()
     count = row[0] if row else 0
     if count >= FREE_CHECKS_PER_DAY:
         conn.close()
         return False
-    if db == "pg":
-        cur.execute(
-            "INSERT INTO daily_checks (user_id, date, count) VALUES (%s,%s,1) "
-            "ON CONFLICT(user_id, date) DO UPDATE SET count = daily_checks.count + 1",
-            (user_id, today)
-        )
-    else:
-        cur.execute(
-            "INSERT INTO daily_checks (user_id, date, count) VALUES (?,?,1) "
-            "ON CONFLICT(user_id, date) DO UPDATE SET count = count + 1",
-            (user_id, today)
-        )
+    cur.execute(
+        "INSERT INTO daily_checks (user_id, date, count) VALUES (%s,%s,1) "
+        "ON CONFLICT(user_id, date) DO UPDATE SET count = daily_checks.count + 1",
+        (user_id, today)
+    )
     conn.commit()
     conn.close()
     return True
@@ -301,10 +266,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
     else:
         today = datetime.now().strftime("%Y-%m-%d")
-        conn, db = get_conn()
+        conn = get_conn()
         cur = conn.cursor()
-        ph = "%s" if db == "pg" else "?"
-        cur.execute(f"SELECT count FROM daily_checks WHERE user_id = {ph} AND date = {ph}", (user_id, today))
+        cur.execute("SELECT count FROM daily_checks WHERE user_id = %s AND date = %s", (user_id, today))
         row = cur.fetchone()
         conn.close()
         used = row[0] if row else 0
@@ -325,14 +289,13 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lines = []
     try:
-        lines.append(f"DB: {'PostgreSQL' if DATABASE_URL else 'SQLite'}")
-        lines.append(f"DATABASE_URL set: {bool(DATABASE_URL)}")
-        conn, db = get_conn()
-        lines.append(f"Connected: {db}")
+        lines.append("DB: PostgreSQL")
+        lines.append(f"DATABASE_URL set: True")
+        conn = get_conn()
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM subscriptions")
         lines.append(f"Total subs: {cur.fetchone()[0]}")
-        cur.execute("SELECT user_id, expires_at FROM subscriptions WHERE user_id = %s" if db == "pg" else "SELECT user_id, expires_at FROM subscriptions WHERE user_id = ?", (user_id,))
+        cur.execute("SELECT user_id, expires_at FROM subscriptions WHERE user_id = %s", (user_id,))
         row = cur.fetchone()
         lines.append(f"My sub: {row}")
         conn.close()
@@ -444,10 +407,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = f"✅ *Подписка активна*\nДействует до: *{expiry}*\n⚡ Безлимитные проверки включены"
         else:
             today = datetime.now().strftime("%Y-%m-%d")
-            conn, db = get_conn()
+            conn = get_conn()
             cur = conn.cursor()
-            ph = "%s" if db == "pg" else "?"
-            cur.execute(f"SELECT count FROM daily_checks WHERE user_id = {ph} AND date = {ph}", (user_id, today))
+            cur.execute("SELECT count FROM daily_checks WHERE user_id = %s AND date = %s", (user_id, today))
             row = cur.fetchone()
             conn.close()
             used = row[0] if row else 0
