@@ -50,7 +50,7 @@ def get_usd_rate() -> float:
     logger.warning("All rate sources failed, using fallback 90")
     return 90.0
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8649933614:AAFtSLs2sAyPzKiErNhmpIZeaP93XeKpX5I")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8649933614:AAG8yFnTGV-h4mf-0cOQKta-sWAD-y4UN38")
 ADMIN_ID = 587349420
 STARS_PRICE = 99  # Telegram Stars for 30 days
 
@@ -250,6 +250,10 @@ def detect_niche(description: str) -> str:
     return "default"
 
 def get_channel_info(username: str, token: str) -> dict:
+    # Sanitize: take only first word, strip @, spaces, newlines
+    username = re.split(r'[\s@]', username.strip().lstrip('@'))[0].strip()
+    if not username:
+        raise ValueError("Не удалось распознать username канала")
     url = f"https://api.telegram.org/bot{token}/getChat?chat_id=@{username}"
     with urllib.request.urlopen(urllib.request.Request(url), timeout=10) as r:
         data = json.loads(r.read())
@@ -536,7 +540,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ {e}")
     except Exception as e:
         logger.error(f"Error analyzing @{username}: {e}", exc_info=True)
-        await msg.edit_text(f"❌ Ошибка при анализе: {str(e)}")
+        await msg.edit_text("❌ Не удалось получить данные канала. Попробуй позже.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
