@@ -52,6 +52,7 @@ def get_usd_rate() -> float:
     return 90.0
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8649933614:AAFtSLs2sAyPzKiErNhmpIZeaP93XeKpX5I")
+ADMIN_ID = 587349420
 DB_PATH = os.getenv("DB_PATH", "/tmp/tganalyzer.db")
 STARS_PRICE = 99  # Telegram Stars for 30 days
 
@@ -112,6 +113,10 @@ def init_db():
     conn.commit()
     conn.close()
     logger.info(f"DB initialized: {'PostgreSQL' if DATABASE_URL else 'SQLite'}")
+    # Auto-grant permanent subscription to admin
+    if not is_premium(ADMIN_ID):
+        add_subscription(ADMIN_ID, days=3650)
+        logger.info(f"Admin subscription auto-granted to {ADMIN_ID}")
 
 def is_premium(user_id: int) -> bool:
     try:
