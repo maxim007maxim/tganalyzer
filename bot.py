@@ -177,21 +177,16 @@ def save_channel_cache(username: str, members: int, avg_views: float, er: float,
         total = cur.fetchone()[0]
         conn.close()
         if total in CACHE_NOTIFY_MILESTONES:
-            asyncio.create_task(_notify_admin_cache(total))
+            try:
+                text = f"🎯 База каналов достигла {total}! Можно добавлять кнопки с топом по категориям." if total == 100 else f"📊 База каналов: уже {total} каналов."
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                data = json.dumps({"chat_id": ADMIN_ID, "text": text}).encode()
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as ne:
+                logger.error(f"cache milestone notify error: {ne}")
     except Exception as e:
         logger.error(f"save_channel_cache error: {e}")
-
-async def _notify_admin_cache(total: int):
-    try:
-        from telegram import Bot
-        bot = Bot(token=BOT_TOKEN)
-        if total == 100:
-            text = f"🎯 База каналов достигла {total}! Можно добавлять кнопки с топом по категориям."
-        else:
-            text = f"📊 База каналов: уже {total} каналов накоплено."
-        await bot.send_message(chat_id=ADMIN_ID, text=text)
-    except Exception as e:
-        logger.error(f"_notify_admin_cache error: {e}")
 
 # --- Gift codes ---
 
@@ -593,9 +588,13 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Admin notify error: {e}")
 
+async def error_handler(update, context):
+    logger.error(f"Exception while handling update: {context.error}", exc_info=context.error)
+
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
+    app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("debug", debug_command))
