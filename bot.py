@@ -1,6 +1,7 @@
 import asyncio
 import re
 import urllib.request
+import urllib.parse
 import json
 import os
 import logging
@@ -572,7 +573,24 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Save to channel cache for future top-by-category feature
         save_channel_cache(username, members, avg_views, er, niche, fair_price, posts_per_day)
 
-        keyboard = []
+        # Текст для шаринга
+        share_text = (
+            f"📊 Проверил канал @{username}:\n"
+            f"👥 {fmt_num(members)} подписчиков\n"
+            f"👁 Охват: {fmt_num(avg_views)}\n"
+            f"📈 ER: {er:.1f}% — {er_status}\n"
+            f"💰 ~{fair_price:,} ₽ за пост\n\n"
+            f"Проверь свой канал → @tggroup_analyzer_bot"
+        )
+        share_url = (
+            "https://t.me/share/url?"
+            f"url=https://t.me/tggroup_analyzer_bot&"
+            f"text={urllib.parse.quote(share_text)}"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("📤 Поделиться результатом", url=share_url)]
+        ]
         if not is_premium(user_id):
             keyboard.append([InlineKeyboardButton(f"⚡ Безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
 
