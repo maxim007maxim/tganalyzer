@@ -504,12 +504,25 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     add_subscription(user_id, days=30)
     expiry = get_expiry(user_id)
+    user = update.effective_user
+    username = f"@{user.username}" if user.username else f"id{user_id}"
     await update.message.reply_text(
         f"✅ *Оплата прошла! Спасибо!*\n\n"
         f"⚡ Безлимитный доступ активирован до *{expiry}*\n"
         f"Теперь проверяй сколько угодно каналов!",
         parse_mode="Markdown"
     )
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💰 Новый платный подписчик!\n\n"
+                 f"👤 {user.full_name} ({username})\n"
+                 f"🆔 {user_id}\n"
+                 f"📅 Подписка до: {expiry}\n"
+                 f"⭐ Оплата: {STARS_PRICE} Stars"
+        )
+    except Exception as e:
+        logger.error(f"Admin notify error: {e}")
 
 def main():
     init_db()
