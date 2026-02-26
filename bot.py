@@ -102,6 +102,16 @@ def init_db():
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS gift_codes (
+            code TEXT PRIMARY KEY,
+            days INT NOT NULL DEFAULT 30,
+            used BOOLEAN NOT NULL DEFAULT FALSE,
+            used_by BIGINT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            used_at TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
     logger.info("DB initialized: PostgreSQL")
@@ -182,6 +192,42 @@ async def _notify_admin_cache(total: int):
         await bot.send_message(chat_id=ADMIN_ID, text=text)
     except Exception as e:
         logger.error(f"_notify_admin_cache error: {e}")
+
+# --- Gift codes ---
+
+def generate_gift_code(days: int = 30) -> str:
+    import secrets, string
+    alphabet = string.ascii_uppercase + string.digits
+    code = "GIFT-" + "".join(secrets.choice(alphabet) for _ in range(8))
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO gift_codes (code, days) VALUES (%s, %s)", (code, days))
+    conn.commit()
+    conn.close()
+    return code
+
+def redeem_gift_code(code: str, user_id: int) -> tuple[bool, str]:
+    """Returns (success, message)"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT days, used, used_by FROM gift_codes WHERE code = %s", (code,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False, "❌ Код не найден."
+    days, used, used_by = row
+    if used:
+        conn.close()
+        return False, "❌ Этот код уже был использован."
+    cur.execute(
+        "UPDATE gift_codes SET used = TRUE, used_by = %s, used_at = NOW() WHERE code = %s",
+        (user_id, code)
+    )
+    conn.commit()
+    conn.close()
+    add_subscription(user_id, days=days)
+    expiry = get_expiry(user_id)
+    return True, f"🎁 Подарочная подписка активирована!\n⚡ Безлимитный доступ до *{expiry}*"
 
 # --- Helpers ---
 
@@ -366,8 +412,28 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expiry = get_expiry(target_id)
     await update.message.reply_text(f"✅ Подписка выдана пользователю {target_id} до {expiry}")
 
+async def giftcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin only: /giftcode [days] — generate a gift code"""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    days = int(context.args[0]) if context.args else 30
+    code = generate_gift_code(days=days)
+    await update.message.reply_text(
+        f"🎁 Подарочный код на {days} дней:\n\n`{code}`\n\nОтправь его пользователю — он вводит прямо в бота.",
+        parse_mode="Markdown"
+    )
+
 async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or update.message.caption or ""
+
+    # Check if message is a gift code
+    stripped = text.strip().upper()
+    if stripped.startswith("GIFT-"):
+        user_id = update.effective_user.id
+        success, msg = redeem_gift_code(stripped, user_id)
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        return
+
     username = None
     if update.message.entities:
         for entity in update.message.entities:
@@ -531,6 +597,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("debug", debug_command))
     app.add_handler(CommandHandler("grant", grant_command))
+    app.add_handler(CommandHandler("giftcode", giftcode_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_channel))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(PreCheckoutQueryHandler(precheckout))
