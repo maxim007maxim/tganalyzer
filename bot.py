@@ -416,12 +416,15 @@ async def giftcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin only: /giftcode [days] — generate a gift code"""
     if update.effective_user.id != ADMIN_ID:
         return
-    days = int(context.args[0]) if context.args else 30
-    code = generate_gift_code(days=days)
-    await update.message.reply_text(
-        f"🎁 Подарочный код на {days} дней:\n\n`{code}`\n\nОтправь его пользователю — он вводит прямо в бота.",
-        parse_mode="Markdown"
-    )
+    try:
+        days = int(context.args[0]) if context.args else 30
+        code = generate_gift_code(days=days)
+        await update.message.reply_text(
+            f"🎁 Подарочный код на {days} дней:\n\n`{code}`\n\nОтправь его пользователю — он вводит прямо в бота.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or update.message.caption or ""
