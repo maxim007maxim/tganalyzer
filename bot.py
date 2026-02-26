@@ -161,8 +161,10 @@ def extract_username(text: str):
         part = text.split('t.me/')[-1].split('/')[0].split('?')[0].strip()
         return part if part else None
     if text.startswith('@'):
-        return text[1:].split('/')[0].split('?')[0].strip() or None
-    if ' ' not in text and len(text) >= 4 and re.match(r'^[a-zA-Z0-9_]+$', text):
+        # Берём только первое слово (до пробела/переноса строки)
+        first_word = re.split(r'\s', text[1:])[0]
+        return first_word.split('/')[0].split('?')[0].strip() or None
+    if re.match(r'^[a-zA-Z0-9_]+$', text) and len(text) >= 4:
         return text
     return None
 
@@ -344,15 +346,6 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expiry = get_expiry(target_id)
     await update.message.reply_text(f"✅ Подписка выдана пользователю {target_id} до {expiry}")
 
-async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if not args:
-        await update.message.reply_text("Укажи канал: /analyze @username или просто отправь @username")
-        return
-    raw = " ".join(args).lstrip("@")
-    update.message.text = raw
-    await analyze_channel(update, context)
-
 async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or update.message.caption or ""
     username = None
@@ -501,7 +494,6 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("debug", debug_command))
     app.add_handler(CommandHandler("grant", grant_command))
-    app.add_handler(CommandHandler("analyze", analyze_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_channel))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(PreCheckoutQueryHandler(precheckout))
