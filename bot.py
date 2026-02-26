@@ -143,6 +143,8 @@ def get_expiry(user_id: int):
         return None
     return str(row[0])[:10]  # YYYY-MM-DD
 
+CACHE_NOTIFY_MILESTONES = [100, 250, 500, 1000]
+
 def save_channel_cache(username: str, members: int, avg_views: float, er: float,
                         niche: str, fair_price: int, posts_per_day: float):
     try:
@@ -161,9 +163,25 @@ def save_channel_cache(username: str, members: int, avg_views: float, er: float,
                 updated_at = NOW()
         """, (username, members, avg_views, er, niche, fair_price, posts_per_day))
         conn.commit()
+        cur.execute("SELECT COUNT(*) FROM channel_cache")
+        total = cur.fetchone()[0]
         conn.close()
+        if total in CACHE_NOTIFY_MILESTONES:
+            asyncio.create_task(_notify_admin_cache(total))
     except Exception as e:
         logger.error(f"save_channel_cache error: {e}")
+
+async def _notify_admin_cache(total: int):
+    try:
+        from telegram import Bot
+        bot = Bot(token=BOT_TOKEN)
+        if total == 100:
+            text = f"🎯 База каналов достигла {total}! Можно добавлять кнопки с топом по категориям."
+        else:
+            text = f"📊 База каналов: уже {total} каналов накоплено."
+        await bot.send_message(chat_id=ADMIN_ID, text=text)
+    except Exception as e:
+        logger.error(f"_notify_admin_cache error: {e}")
 
 # --- Helpers ---
 
