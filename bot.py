@@ -420,6 +420,44 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expiry = get_expiry(target_id)
     await update.message.reply_text(f"✅ Подписка выдана пользователю {target_id} до {expiry}")
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin only: /stats — show bot usage statistics"""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        cur.execute("SELECT COUNT(DISTINCT user_id) FROM daily_checks")
+        total_users = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(DISTINCT user_id) FROM daily_checks WHERE date = %s", (today,))
+        today_users = cur.fetchone()[0]
+
+        cur.execute("SELECT SUM(count) FROM daily_checks WHERE date = %s", (today,))
+        today_checks = cur.fetchone()[0] or 0
+
+        cur.execute("SELECT COUNT(*) FROM subscriptions WHERE expires_at > NOW()")
+        active_subs = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM channel_cache")
+        cached_channels = cur.fetchone()[0]
+
+        conn.close()
+
+        text = (
+            f"📊 *Статистика бота*\n\n"
+            f"👥 Всего пользователей: *{total_users}*\n"
+            f"📅 Активных сегодня: *{today_users}*\n"
+            f"🔍 Проверок сегодня: *{today_checks}*\n"
+            f"💎 Активных подписок: *{active_subs}*\n"
+            f"📦 Каналов в базе: *{cached_channels}*"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
 async def giftcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin only: /giftcode [days] — generate a gift code"""
     if update.effective_user.id != ADMIN_ID:
@@ -623,6 +661,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("debug", debug_command))
     app.add_handler(CommandHandler("grant", grant_command))
+    app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("giftcode", giftcode_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_channel))
     app.add_handler(CallbackQueryHandler(button_callback))
