@@ -268,14 +268,24 @@ def get_channel_info(username: str, token: str) -> dict:
         "members": count_data.get("result", 0)
     }
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
 def get_post_views(username: str) -> tuple:
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept-Language": "ru-RU,ru;q=0.9"
     }
     url = f"https://t.me/s/{username}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as r:
-        content = r.read().decode()
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=10) as r:
+            content = r.read().decode()
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 303, 307, 308):
+            return [], []  # Канал не имеет публичного веб-превью
+        raise
     views_raw = re.findall(r'tgme_widget_message_views[^>]*>([^<]+)<', content)
     views = []
     for v in views_raw:
@@ -463,7 +473,18 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         views, dates = get_post_views(username)
 
         if not views:
-            await msg.edit_text("❌ Не удалось получить данные. Канал может быть закрытым или без публичных постов.")
+            # Веб-превью отключено — показываем только базовую инфу
+            members = info["members"]
+            result = (
+                f"📊 *@{username}*\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"👥 Подписчики: {fmt_num(members)}\n"
+                f"👁 Охват: недоступен\n"
+                f"ℹ️ Канал скрыл статистику просмотров в веб-версии\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💰 Цену рекламы рассчитать невозможно без данных охвата\n"
+            )
+            await msg.edit_text(result, parse_mode="Markdown")
             return
 
         members = info["members"]
