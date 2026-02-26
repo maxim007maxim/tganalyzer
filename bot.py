@@ -90,6 +90,18 @@ def init_db():
             PRIMARY KEY (user_id, date)
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS channel_cache (
+            username TEXT PRIMARY KEY,
+            members BIGINT,
+            avg_views FLOAT,
+            er FLOAT,
+            niche TEXT,
+            fair_price INT,
+            posts_per_day FLOAT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
     conn.commit()
     conn.close()
     logger.info("DB initialized: PostgreSQL")
@@ -130,6 +142,28 @@ def get_expiry(user_id: int):
     if not row:
         return None
     return str(row[0])[:10]  # YYYY-MM-DD
+
+def save_channel_cache(username: str, members: int, avg_views: float, er: float,
+                        niche: str, fair_price: int, posts_per_day: float):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO channel_cache (username, members, avg_views, er, niche, fair_price, posts_per_day, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT(username) DO UPDATE SET
+                members = EXCLUDED.members,
+                avg_views = EXCLUDED.avg_views,
+                er = EXCLUDED.er,
+                niche = EXCLUDED.niche,
+                fair_price = EXCLUDED.fair_price,
+                posts_per_day = EXCLUDED.posts_per_day,
+                updated_at = NOW()
+        """, (username, members, avg_views, er, niche, fair_price, posts_per_day))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"save_channel_cache error: {e}")
 
 # --- Helpers ---
 
@@ -358,12 +392,14 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         er_status = get_er_status(er)
 
         freq_text = ""
+        posts_per_day = 0.0
         if len(dates) >= 2:
             try:
                 d1 = datetime.fromisoformat(dates[0].replace('Z', '+00:00'))
                 d2 = datetime.fromisoformat(dates[-1].replace('Z', '+00:00'))
-                days = abs((d1 - d2).days) or 1
-                freq_text = f"\n📅 Частота: ~{len(dates)/days:.1f} постов/день"
+                span_days = abs((d1 - d2).days) or 1
+                posts_per_day = len(dates) / span_days
+                freq_text = f"\n📅 Частота: ~{posts_per_day:.1f} постов/день"
             except: pass
 
         usd_rate = get_usd_rate()
@@ -383,6 +419,9 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if er < 5:
             result += "⚠️ *Внимание:* низкий ER — возможна накрутка\n"
+
+        # Save to channel cache for future top-by-category feature
+        save_channel_cache(username, members, avg_views, er, niche, fair_price, posts_per_day)
 
         keyboard = []
         if not is_premium(user_id):
