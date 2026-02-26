@@ -560,7 +560,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━\n"
             f"👥 Подписчики: {fmt_num(members)}\n"
             f"👁 Средний охват: {fmt_num(avg_views)} ({len(views)} постов)\n"
-            f"📈 ER: {er:.1f}% — {er_status}"
+            f"👁 Читают посты: {er:.1f}% — {er_status}"
             f"{freq_text}\n"
             f"━━━━━━━━━━━━━━\n"
             f"💰 *Справедливая цена поста:*\n"
@@ -578,7 +578,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 Проверил канал @{username}:\n"
             f"👥 {fmt_num(members)} подписчиков\n"
             f"👁 Охват: {fmt_num(avg_views)}\n"
-            f"📈 ER: {er:.1f}% — {er_status}\n"
+            f"👁 Читают посты: {er:.1f}% — {er_status}\n"
             f"💰 ~{fair_price:,} ₽ за пост\n\n"
             f"Проверь свой канал → @tggroup_analyzer_bot"
         )
