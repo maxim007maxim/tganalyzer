@@ -357,7 +357,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Попробуй: отправь @durov или любой другой канал"
     )
     keyboard = [
-        [InlineKeyboardButton("🔍 Начать анализ", switch_inline_query_current_chat="@")],
         [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
     ]
     if not premium:
