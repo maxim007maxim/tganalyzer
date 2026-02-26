@@ -361,6 +361,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if not premium:
         keyboard.append([InlineKeyboardButton(f"⚡ Купить безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
+    if update.effective_user.id == ADMIN_ID:
+        keyboard.append([
+            InlineKeyboardButton("📈 Статистика", callback_data="admin_stats"),
+            InlineKeyboardButton("🎁 Гифт-код", callback_data="admin_giftcode"),
+        ])
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -610,6 +615,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             currency="XTR",  # Telegram Stars
             prices=[LabeledPrice("30 дней безлимита", STARS_PRICE)],
         )
+    elif query.data == "admin_stats":
+        if query.from_user.id != ADMIN_ID:
+            return
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            today = datetime.now().strftime("%Y-%m-%d")
+            cur.execute("SELECT COUNT(DISTINCT user_id) FROM daily_checks")
+            total_users = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(DISTINCT user_id) FROM daily_checks WHERE date = %s", (today,))
+            today_users = cur.fetchone()[0]
+            cur.execute("SELECT SUM(count) FROM daily_checks WHERE date = %s", (today,))
+            today_checks = cur.fetchone()[0] or 0
+            cur.execute("SELECT COUNT(*) FROM subscriptions WHERE expires_at > NOW()")
+            active_subs = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM channel_cache")
+            cached_channels = cur.fetchone()[0]
+            conn.close()
+            text = (f"📊 *Статистика*\n\n👥 Всего: *{total_users}*\n📅 Сегодня: *{today_users}*\n"
+                    f"🔍 Проверок сегодня: *{today_checks}*\n💎 Подписок: *{active_subs}*\n📦 Каналов в базе: *{cached_channels}*")
+            await query.message.reply_text(text, parse_mode="Markdown")
+        except Exception as e:
+            await query.message.reply_text(f"❌ {e}")
+    elif query.data == "admin_giftcode":
+        if query.from_user.id != ADMIN_ID:
+            return
+        try:
+            code = generate_gift_code(days=30)
+            await query.message.reply_text(f"🎁 Код на 30 дней:\n\n`{code}`", parse_mode="Markdown")
+        except Exception as e:
+            await query.message.reply_text(f"❌ {e}")
     elif query.data.startswith("monitor_"):
         channel = query.data.split("_", 1)[1]
         user_id = query.from_user.id
