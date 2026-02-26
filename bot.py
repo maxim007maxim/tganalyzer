@@ -494,28 +494,10 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="Markdown"
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "📊 <b>Как пользоваться ботом</b>\n\n"
-        "Отправь @username или ссылку на Telegram-канал — я проанализирую его и покажу:\n"
-        "• Охват и вовлечённость (ER)\n"
-        "• Справедливую цену рекламы в ₽ и $\n"
-        "• Оценку качества аудитории\n\n"
-        "<b>Команды:</b>\n"
-        "/analyze @username — анализ конкретного канала\n"
-        "/status — твой статус и оставшиеся проверки\n\n"
-        "<b>Лимиты:</b>\n"
-        f"• Бесплатно: {FREE_CHECKS_PER_DAY} проверки в день\n"
-        "• Безлимит: 99 Stars на 30 дней\n\n"
-        "Просто пришли ссылку — и поехали 🚀"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
-
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("debug", debug_command))
     app.add_handler(CommandHandler("grant", grant_command))
