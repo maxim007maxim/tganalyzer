@@ -272,9 +272,9 @@ def extract_username(text: str):
         return text
     return None
 
-def detect_niche(description: str, title: str = "", username: str = "") -> str:
-    # Ищем по описанию + названию + username
-    text = f"{description} {title} {username}".lower()
+def detect_niche(description: str, title: str = "", username: str = "", posts_text: str = "") -> str:
+    # Ищем по описанию + названию + username + текстам постов
+    text = f"{description} {title} {username} {posts_text}".lower()
     for niche, keywords in NICHE_KEYWORDS.items():
         for kw in keywords:
             if kw in text:
@@ -320,7 +320,7 @@ def get_post_views(username: str) -> tuple:
             content = r.read().decode()
     except urllib.error.HTTPError as e:
         if e.code in (301, 302, 303, 307, 308):
-            return [], []  # Канал не имеет публичного веб-превью
+            return [], [], ""  # Канал не имеет публичного веб-превью
         raise
     views_raw = re.findall(r'tgme_widget_message_views[^>]*>([^<]+)<', content)
     views = []
@@ -332,7 +332,10 @@ def get_post_views(username: str) -> tuple:
             else: views.append(float(v))
         except: pass
     dates = re.findall(r'datetime="([^"]+)"', content)
-    return views, dates
+    # Извлекаем текст постов для определения ниши
+    post_texts = re.findall(r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', content, re.DOTALL)
+    posts_text = " ".join(re.sub(r'<[^>]+>', ' ', t) for t in post_texts)
+    return views, dates, posts_text
 
 def calculate_fair_price(avg_views: float, niche: str) -> tuple:
     cpm = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
@@ -548,7 +551,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         info = get_channel_info(username, BOT_TOKEN)
-        views, dates = get_post_views(username)
+        views, dates, posts_text = get_post_views(username)
 
         if not views:
             # Веб-превью отключено — показываем только базовую инфу
@@ -568,7 +571,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         members = info["members"]
         avg_views = sum(views) / len(views)
         er = (avg_views / members * 100) if members > 0 else 0
-        niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""))
+        niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""), posts_text)
         fair_price, cpm = calculate_fair_price(avg_views, niche)
         er_status = get_er_status(er)
 
