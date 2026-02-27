@@ -595,7 +595,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━\n"
             f"💰 *Справедливая цена поста:*\n"
             f"   ~{fair_price:,} ₽ (~${fair_price_usd:,})\n"
-            f"📌 Ниша: {NICHE_LABELS.get(niche, 'Общая')} (CPM {cpm:,}₽)\n"
+            f"📌 Ниша: {NICHE_LABELS.get(niche, 'Общая')}\n"
             f"━━━━━━━━━━━━━━\n"
         )
         if er < 5:
