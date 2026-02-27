@@ -86,7 +86,7 @@ NICHE_LABELS = {
 }
 
 NICHE_KEYWORDS = {
-    "arbitrage":     ["арбитраж", "трафик", "партнёрк", "партнерк", "cpa", "offerwalls", "оффер", "affiliate", "лид", "конверси"],
+    "arbitrage":     ["арбитраж", "трафик", "traffic", "партнёрк", "партнерк", "cpa", "offerwalls", "оффер", "affiliate", "лид", "конверси", "click", "клик", "медиабай", "media buy", "баинг", "баер", "webmaster", "вебмастер", "монетизац"],
     "crypto":        ["крипт", "bitcoin", "btc", "eth", "web3", "nft", "блокчейн", "defi", "токен", "binance", "биржа", "трейд", "альткоин"],
     "finance":       ["финанс", "инвестиц", "акци", "фондов", "биржа", "доход", "заработ", "деньги", "бюджет", "ипотек", "вклад"],
     "business":      ["бизнес", "предприним", "стартап", "маркетплейс", "wildberries", "ozon", "продажи", "b2b"],
@@ -272,11 +272,12 @@ def extract_username(text: str):
         return text
     return None
 
-def detect_niche(description: str) -> str:
-    desc = (description or "").lower()
+def detect_niche(description: str, title: str = "", username: str = "") -> str:
+    # Ищем по описанию + названию + username
+    text = f"{description} {title} {username}".lower()
     for niche, keywords in NICHE_KEYWORDS.items():
         for kw in keywords:
-            if kw in desc:
+            if kw in text:
                 return niche
     return "default"
 
@@ -567,7 +568,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         members = info["members"]
         avg_views = sum(views) / len(views)
         er = (avg_views / members * 100) if members > 0 else 0
-        niche = detect_niche(info["description"])
+        niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""))
         fair_price, cpm = calculate_fair_price(avg_views, niche)
         er_status = get_er_status(er)
 
