@@ -56,18 +56,18 @@ ADMIN_ID = 587349420
 STARS_PRICE = 99  # Telegram Stars for 30 days
 
 CPM_BY_NICHE = {
-    "arbitrage":     45000,   # $500 — арбитраж/трафик
-    "crypto":        36000,   # $400 — крипто/web3
-    "finance":       13500,   # $150 — финансы/инвестиции
-    "business":       7200,   # $80  — бизнес
-    "it":             5400,   # $60  — IT/технологии
-    "education":      2700,   # $30  — образование
-    "lifestyle":      1800,   # $20  — лайфстайл/красота
-    "sport":          1350,   # $15  — спорт
-    "gaming":         1350,   # $15  — игры
-    "news":            900,   # $10  — новости
-    "entertainment":   720,   # $8   — развлечения/юмор
-    "default":        1800,   # $20  — всё остальное
+    "arbitrage":     45000,   # $500 — арбитраж/трафик (реальные данные рынка)
+    "crypto":         1100,   # midpoint 700-1500 ₽ — крипто/web3
+    "finance":        1250,   # midpoint 800-1700 ₽ — финансы/инвестиции
+    "business":       1050,   # midpoint 700-1400 ₽ — бизнес
+    "it":              800,   # midpoint 500-1100 ₽ — IT/технологии
+    "education":       650,   # midpoint 400-900 ₽  — образование
+    "lifestyle":       575,   # midpoint 350-800 ₽  — лайфстайл/красота
+    "sport":           500,   # midpoint 300-700 ₽  — спорт
+    "gaming":          450,   # midpoint 250-650 ₽  — игры
+    "news":            425,   # midpoint 250-600 ₽  — новости
+    "entertainment":   350,   # midpoint 200-500 ₽  — развлечения/юмор
+    "default":         400,   # midpoint 200-600 ₽  — всё остальное
 }
 
 NICHE_LABELS = {
