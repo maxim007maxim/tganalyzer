@@ -341,6 +341,89 @@ def calculate_fair_price(avg_views: float, niche: str) -> tuple:
     cpm = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
     return int(avg_views * cpm / 1000), cpm
 
+def parse_channels_from_text(text: str) -> list:
+    """Парсит список (username, asked_price|None) из сообщения.
+    Поддерживает: @ch1 50000 @ch2 @ch3 30000  /  t.me/ch1 50000
+    """
+    results = []
+    # Нормализуем t.me/ → @
+    text = re.sub(r'https?://t\.me/([A-Za-z0-9_]+)', r'@\1', text)
+    text = re.sub(r't\.me/([A-Za-z0-9_]+)', r'@\1', text)
+    tokens = text.split()
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith('@') and len(token) > 1:
+            username = re.sub(r'[^A-Za-z0-9_]', '', token[1:])
+            if len(username) >= 4:
+                price = None
+                if i + 1 < len(tokens):
+                    next_tok = re.sub(r'[,\s]', '', tokens[i + 1])
+                    if re.match(r'^\d+$', next_tok):
+                        price = int(next_tok)
+                        i += 1
+                results.append((username, price))
+        i += 1
+    return results
+
+def get_price_verdict(asked: int, fair: int) -> str:
+    if fair == 0:
+        return ""
+    ratio = asked / fair
+    if ratio <= 0.7:
+        return f"🔥 ВЫГОДНО — на {int((1-ratio)*100)}% дешевле справедливой"
+    elif ratio <= 1.15:
+        return "✅ СПРАВЕДЛИВО — цена адекватная"
+    elif ratio <= 2.0:
+        return f"⚠️ ДОРОГОВАТО — в {ratio:.1f}x выше справедливой"
+    else:
+        return f"🚨 ПЕРЕПЛАТА в {ratio:.1f}x — цена сильно завышена"
+
+async def analyze_one(username: str) -> dict:
+    """Анализирует один канал, возвращает dict с данными или {'error': ...}"""
+    try:
+        info = get_channel_info(username, BOT_TOKEN)
+        views, dates, posts_text = get_post_views(username)
+        if not views:
+            return {
+                "username": username,
+                "members": info["members"],
+                "no_views": True,
+            }
+        members = info["members"]
+        avg_views = sum(views) / len(views)
+        er = (avg_views / members * 100) if members > 0 else 0
+        niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""), posts_text)
+        fair_price, cpm = calculate_fair_price(avg_views, niche)
+        usd_rate = get_usd_rate()
+        posts_per_day = 0.0
+        if len(dates) >= 2:
+            try:
+                d1 = datetime.fromisoformat(dates[0].replace('Z', '+00:00'))
+                d2 = datetime.fromisoformat(dates[-1].replace('Z', '+00:00'))
+                span_days = abs((d1 - d2).days) or 1
+                posts_per_day = len(dates) / span_days
+            except: pass
+        save_channel_cache(username, members, avg_views, er, niche, fair_price, posts_per_day)
+        return {
+            "username": username,
+            "members": members,
+            "avg_views": avg_views,
+            "er": er,
+            "er_status": get_er_status(er),
+            "niche": niche,
+            "fair_price": fair_price,
+            "fair_price_usd": int(fair_price / usd_rate),
+            "posts_per_day": posts_per_day,
+            "no_views": False,
+            "error": None,
+        }
+    except ValueError as e:
+        return {"username": username, "error": str(e)}
+    except Exception as e:
+        logger.error(f"analyze_one @{username}: {e}", exc_info=True)
+        return {"username": username, "error": "Не удалось получить данные"}
+
 def check_daily_limit(user_id: int) -> bool:
     if is_premium(user_id):
         return True
@@ -515,28 +598,36 @@ async def giftcode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or update.message.caption or ""
 
-    # Check if message is a gift code
-    stripped = text.strip().upper()
-    if stripped.startswith("GIFT-"):
+    # Gift code check
+    if text.strip().upper().startswith("GIFT-"):
         user_id = update.effective_user.id
-        success, msg = redeem_gift_code(stripped, user_id)
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        success, msg_text = redeem_gift_code(text.strip().upper(), user_id)
+        await update.message.reply_text(msg_text, parse_mode="Markdown")
         return
 
-    username = None
-    if update.message.entities:
-        for entity in update.message.entities:
-            if entity.type in ("url", "text_link"):
-                url = entity.url or text[entity.offset:entity.offset+entity.length]
-                username = extract_username(url)
-                if username: break
-    if not username:
-        username = extract_username(text)
-    if not username:
+    # Парсим все каналы из сообщения
+    channels = parse_channels_from_text(text)
+
+    # Fallback: старый парсер для одного канала (entity-based)
+    if not channels:
+        username = None
+        if update.message.entities:
+            for entity in update.message.entities:
+                if entity.type in ("url", "text_link"):
+                    url = entity.url or text[entity.offset:entity.offset+entity.length]
+                    username = extract_username(url)
+                    if username: break
+        if not username:
+            username = extract_username(text)
+        if not username:
+            return
+        channels = [(username, None)]
+
+    if len(channels) > 5:
+        await update.message.reply_text("⚠️ Максимум 5 каналов за раз.")
         return
 
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} checking @{username}")
 
     if not check_daily_limit(user_id):
         keyboard = [[InlineKeyboardButton(f"⚡ Купить безлимит — {STARS_PRICE} ⭐", callback_data="buy")]]
@@ -547,74 +638,60 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = await update.message.reply_text(f"🔍 Анализирую @{username}...")
+    # ── ОДИН КАНАЛ ──────────────────────────────────────────────
+    if len(channels) == 1:
+        username, asked_price = channels[0]
+        logger.info(f"User {user_id} checking @{username}")
+        msg = await update.message.reply_text(f"🔍 Анализирую @{username}...")
+        data = await analyze_one(username)
 
-    try:
-        info = get_channel_info(username, BOT_TOKEN)
-        views, dates, posts_text = get_post_views(username)
-
-        if not views:
-            # Веб-превью отключено — показываем только базовую инфу
-            members = info["members"]
-            result = (
-                f"📊 *@{username}*\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"👥 Подписчики: {fmt_num(members)}\n"
-                f"👁 Охват: недоступен\n"
-                f"ℹ️ Канал скрыл статистику просмотров в веб-версии\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💰 Цену рекламы рассчитать невозможно без данных охвата\n"
-            )
-            await msg.edit_text(result, parse_mode="Markdown")
+        if data.get("error"):
+            await msg.edit_text(f"❌ {data['error']}")
             return
 
-        members = info["members"]
-        avg_views = sum(views) / len(views)
-        er = (avg_views / members * 100) if members > 0 else 0
-        niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""), posts_text)
-        fair_price, cpm = calculate_fair_price(avg_views, niche)
-        er_status = get_er_status(er)
+        if data.get("no_views"):
+            await msg.edit_text(
+                f"📊 *@{username}*\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"👥 Подписчики: {fmt_num(data['members'])}\n"
+                f"👁 Охват: недоступен\n"
+                f"ℹ️ Канал скрыл статистику просмотров\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💰 Цену рассчитать невозможно без данных охвата",
+                parse_mode="Markdown"
+            )
+            return
 
-        freq_text = ""
-        posts_per_day = 0.0
-        if len(dates) >= 2:
-            try:
-                d1 = datetime.fromisoformat(dates[0].replace('Z', '+00:00'))
-                d2 = datetime.fromisoformat(dates[-1].replace('Z', '+00:00'))
-                span_days = abs((d1 - d2).days) or 1
-                posts_per_day = len(dates) / span_days
-                freq_text = f"\n📅 Частота: ~{posts_per_day:.1f} постов/день"
-            except: pass
-
-        usd_rate = get_usd_rate()
-        fair_price_usd = int(fair_price / usd_rate)
-
+        freq_text = f"\n📅 Частота: ~{data['posts_per_day']:.1f} постов/день" if data['posts_per_day'] > 0 else ""
         result = (
             f"📊 *@{username}*\n"
             f"━━━━━━━━━━━━━━\n"
-            f"👥 Подписчики: {fmt_num(members)}\n"
-            f"👁 Средний охват: {fmt_num(avg_views)}\n"
-            f"📈 ER: {er:.1f}% — {er_status}"
+            f"👥 Подписчики: {fmt_num(data['members'])}\n"
+            f"👁 Средний охват: {fmt_num(data['avg_views'])}\n"
+            f"📈 ER: {data['er']:.1f}% — {data['er_status']}"
             f"{freq_text}\n"
             f"━━━━━━━━━━━━━━\n"
             f"💰 *Справедливая цена поста:*\n"
-            f"   ~{fair_price:,} ₽ (~${fair_price_usd:,})\n"
-            f"📌 Ниша: {NICHE_LABELS.get(niche, 'Общая')}\n"
-            f"━━━━━━━━━━━━━━\n"
+            f"   ~{data['fair_price']:,} ₽ (~${data['fair_price_usd']:,})\n"
+            f"📌 Ниша: {NICHE_LABELS.get(data['niche'], 'Общая')}\n"
         )
-        if er < 5:
+        if asked_price:
+            verdict = get_price_verdict(asked_price, data['fair_price'])
+            result += (
+                f"━━━━━━━━━━━━━━\n"
+                f"💬 Запрашивают: {asked_price:,} ₽\n"
+                f"{verdict}\n"
+            )
+        result += "━━━━━━━━━━━━━━\n"
+        if data['er'] < 5:
             result += "⚠️ *Внимание:* низкий ER — возможна накрутка\n"
 
-        # Save to channel cache for future top-by-category feature
-        save_channel_cache(username, members, avg_views, er, niche, fair_price, posts_per_day)
-
-        # Текст для шаринга
         share_text = (
             f"📊 Проверил канал @{username}:\n"
-            f"👥 {fmt_num(members)} подписчиков\n"
-            f"👁 Охват: {fmt_num(avg_views)}\n"
-            f"📈 ER: {er:.1f}% — {er_status}\n"
-            f"💰 ~{fair_price:,} ₽ за пост\n\n"
+            f"👥 {fmt_num(data['members'])} подписчиков\n"
+            f"👁 Охват: {fmt_num(data['avg_views'])}\n"
+            f"📈 ER: {data['er']:.1f}% — {data['er_status']}\n"
+            f"💰 ~{data['fair_price']:,} ₽ за пост\n\n"
             f"Проверь свой канал → @tggroup_analyzer_bot"
         )
         share_url = (
@@ -622,20 +699,57 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"url=https://t.me/tggroup_analyzer_bot&"
             f"text={urllib.parse.quote(share_text)}"
         )
-
-        keyboard = [
-            [InlineKeyboardButton("📤 Поделиться результатом", url=share_url)]
-        ]
+        keyboard = [[InlineKeyboardButton("📤 Поделиться результатом", url=share_url)]]
         if not is_premium(user_id):
             keyboard.append([InlineKeyboardButton(f"⚡ Безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
-
         await msg.edit_text(result, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    except ValueError as e:
-        await msg.edit_text(f"❌ {e}")
-    except Exception as e:
-        logger.error(f"Error analyzing @{username}: {e}", exc_info=True)
-        await msg.edit_text("❌ Не удалось получить данные канала. Попробуй позже.")
+    # ── НЕСКОЛЬКО КАНАЛОВ ────────────────────────────────────────
+    else:
+        names = ", ".join(f"@{u}" for u, _ in channels)
+        msg = await update.message.reply_text(f"🔍 Анализирую {len(channels)} канала(-ов): {names}...")
+
+        results = await asyncio.gather(*[analyze_one(u) for u, _ in channels])
+
+        lines = [f"📊 *Сравнение {len(channels)} каналов*\n━━━━━━━━━━━━━━"]
+        valid = []
+        for i, (data, (username, asked_price)) in enumerate(zip(results, channels), 1):
+            if data.get("error"):
+                lines.append(f"{i}. @{username} — ❌ {data['error']}")
+                continue
+            if data.get("no_views"):
+                lines.append(f"{i}. @{username} — 👥 {fmt_num(data['members'])} | 👁 охват скрыт")
+                continue
+            line = (
+                f"{i}. *@{username}*\n"
+                f"   👥 {fmt_num(data['members'])} · "
+                f"👁 {fmt_num(data['avg_views'])} · "
+                f"ER {data['er']:.1f}% · "
+                f"💰 ~{data['fair_price']:,}₽"
+            )
+            if asked_price:
+                verdict = get_price_verdict(asked_price, data['fair_price'])
+                line += f"\n   💬 Просят {asked_price:,}₽ — {verdict}"
+            lines.append(line)
+            valid.append(data)
+
+        # Итоги
+        if len(valid) > 1:
+            lines.append("━━━━━━━━━━━━━━")
+            best_er = max(valid, key=lambda d: d['er'])
+            best_cpm = min(valid, key=lambda d: d['fair_price'] / max(d['avg_views'], 1))
+            lines.append(f"🏆 Лучший ER: *@{best_er['username']}* ({best_er['er']:.1f}%)")
+            if best_er['username'] != best_cpm['username']:
+                lines.append(f"💡 Лучшая цена за охват: *@{best_cpm['username']}*")
+
+        result = "\n".join(lines)
+        keyboard = []
+        if not is_premium(user_id):
+            keyboard.append([InlineKeyboardButton(f"⚡ Безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
+        await msg.edit_text(
+            result, parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+        )
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
