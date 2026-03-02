@@ -768,9 +768,9 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append("━━━━━━━━━━━━━━")
             best_er = max(valid, key=lambda d: d['er'])
             best_cpm = min(valid, key=lambda d: d['fair_price'] / max(d['avg_views'], 1))
+            cpm_usd = best_cpm['fair_price_usd'] / max(best_cpm['avg_views'], 1) * 1000
             lines.append(f"🏆 Лучший ER: *@{best_er['username']}* ({best_er['er']:.1f}%)")
-            if best_er['username'] != best_cpm['username']:
-                lines.append(f"💡 Лучшая цена за охват: *@{best_cpm['username']}*")
+            lines.append(f"💡 Лучшая цена за охват: *@{best_cpm['username']}* (~${int(cpm_usd):,} за 1000 просмотров)")
 
         result = "\n".join(lines)
         keyboard = []
