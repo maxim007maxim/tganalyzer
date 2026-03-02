@@ -528,7 +528,7 @@ def get_er_status(er: float) -> str:
     if er >= 20: return "🟢 Отличный"
     if er >= 10: return "🟡 Хороший"
     if er >= 5:  return "🟠 Средний"
-    return "🔴 Низкий (возможна накрутка)"
+    return "🔴 Низкий"
 
 def fmt_num(n: float) -> str:
     if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
