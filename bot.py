@@ -341,31 +341,25 @@ def calculate_fair_price(avg_views: float, niche: str) -> tuple:
     cpm = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
     return int(avg_views * cpm / 1000), cpm
 
-def parse_price_token(token: str) -> int | None:
-    """Парсит токен цены: '100', '100$', '$100', '100₽', '₽100', '100 usd' и т.п.
-    Возвращает цену в рублях или None если не похоже на цену.
+def parse_price_token(token: str):
+    """Парсит токен цены. Возвращает (amount, 'usd'|'rub') или None.
+    Без символа или с $ → доллары.
+    С ₽ / руб / рублей → рубли.
     """
-    t = token.strip().replace(',', '').replace(' ', '')
-    # Определяем валюту и извлекаем число
-    is_usd = False
-    # Убираем символы валюты с любой стороны
-    t_clean = re.sub(r'[$₽\$]|руб\.?|rub\.?|usd\.?', '', t, flags=re.IGNORECASE).strip()
+    t = token.strip().replace(',', '')
+    is_rub = bool(re.search(r'[₽]|руб|рублей', t, re.IGNORECASE))
+    t_clean = re.sub(r'[$₽]|руб\.?|рублей|usd\.?|rub\.?', '', t, flags=re.IGNORECASE).strip()
     if not re.match(r'^\d+$', t_clean):
         return None
     amount = int(t_clean)
-    # Проверяем была ли валюта долларом
-    if re.search(r'[$]|usd', t, re.IGNORECASE):
-        is_usd = True
-    if is_usd:
-        return int(amount * get_usd_rate())
-    return amount
+    return (amount, 'rub') if is_rub else (amount, 'usd')
 
 def parse_channels_from_text(text: str) -> list:
-    """Парсит список (username, asked_price_rub|None) из сообщения.
-    Поддерживает: @ch1 50000 / @ch1 100$ / $100 @ch1 / @ch1 100₽ / t.me/ch1 100$
+    """Парсит список (username, amount, currency) из сообщения.
+    currency: 'usd' | 'rub' | None
+    Поддерживает: @ch1 100$ / @ch1 $100 / @ch1 100₽ / @ch1 5000руб / @ch1 100
     """
     results = []
-    # Нормализуем t.me/ → @
     text = re.sub(r'https?://t\.me/([A-Za-z0-9_]+)', r'@\1', text)
     text = re.sub(r't\.me/([A-Za-z0-9_]+)', r'@\1', text)
     tokens = text.split()
@@ -375,27 +369,39 @@ def parse_channels_from_text(text: str) -> list:
         if token.startswith('@') and len(token) > 1:
             username = re.sub(r'[^A-Za-z0-9_]', '', token[1:])
             if len(username) >= 4:
-                price = None
+                price_data = None
                 if i + 1 < len(tokens):
-                    price = parse_price_token(tokens[i + 1])
-                    if price is not None:
-                        i += 1
-                results.append((username, price))
+                    # Пробуем склеить следующие 1-2 токена (для "100 рублей")
+                    for lookahead in [2, 1]:
+                        candidate = " ".join(tokens[i+1:i+1+lookahead])
+                        parsed = parse_price_token(candidate)
+                        if parsed:
+                            price_data = parsed
+                            i += lookahead
+                            break
+                results.append((username, price_data))
         i += 1
     return results
 
-def get_price_verdict(asked: int, fair: int) -> str:
+def get_price_verdict(asked: int, fair_rub: int, fair_usd: int, currency: str) -> tuple:
+    """Возвращает (display_asked, verdict_str).
+    currency: 'usd' | 'rub'
+    """
+    fair = fair_usd if currency == 'usd' else fair_rub
+    sym = '$' if currency == 'usd' else '₽'
+    display = f"{asked:,}{sym}"
     if fair == 0:
-        return ""
+        return display, ""
     ratio = asked / fair
     if ratio <= 0.7:
-        return f"🔥 ВЫГОДНО — на {int((1-ratio)*100)}% дешевле справедливой"
+        verdict = f"🔥 ВЫГОДНО — на {int((1-ratio)*100)}% дешевле справедливой"
     elif ratio <= 1.15:
-        return "✅ СПРАВЕДЛИВО — цена адекватная"
+        verdict = "✅ СПРАВЕДЛИВО — цена адекватная"
     elif ratio <= 2.0:
-        return f"⚠️ ДОРОГОВАТО — в {ratio:.1f}x выше справедливой"
+        verdict = f"⚠️ ДОРОГОВАТО — в {ratio:.1f}x выше справедливой"
     else:
-        return f"🚨 ПЕРЕПЛАТА в {ratio:.1f}x — цена сильно завышена"
+        verdict = f"🚨 ПЕРЕПЛАТА в {ratio:.1f}x — цена сильно завышена"
+    return display, verdict
 
 async def analyze_one(username: str) -> dict:
     """Анализирует один канал, возвращает dict с данными или {'error': ...}"""
@@ -658,7 +664,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── ОДИН КАНАЛ ──────────────────────────────────────────────
     if len(channels) == 1:
-        username, asked_price = channels[0]
+        username, price_data = channels[0]
         logger.info(f"User {user_id} checking @{username}")
         msg = await update.message.reply_text(f"🔍 Анализирую @{username}...")
         data = await analyze_one(username)
@@ -693,11 +699,12 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"   ~{data['fair_price']:,} ₽ (~${data['fair_price_usd']:,})\n"
             f"📌 Ниша: {NICHE_LABELS.get(data['niche'], 'Общая')}\n"
         )
-        if asked_price:
-            verdict = get_price_verdict(asked_price, data['fair_price'])
+        if price_data:
+            asked, currency = price_data
+            display, verdict = get_price_verdict(asked, data['fair_price'], data['fair_price_usd'], currency)
             result += (
                 f"━━━━━━━━━━━━━━\n"
-                f"💬 Запрашивают: {asked_price:,} ₽\n"
+                f"💬 Запрашивают: {display}\n"
                 f"{verdict}\n"
             )
         result += "━━━━━━━━━━━━━━\n"
@@ -731,7 +738,7 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = [f"📊 *Сравнение {len(channels)} каналов*\n━━━━━━━━━━━━━━"]
         valid = []
-        for i, (data, (username, asked_price)) in enumerate(zip(results, channels), 1):
+        for i, (data, (username, price_data)) in enumerate(zip(results, channels), 1):
             if data.get("error"):
                 lines.append(f"{i}. @{username} — ❌ {data['error']}")
                 continue
@@ -743,11 +750,12 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"   👥 {fmt_num(data['members'])} · "
                 f"👁 {fmt_num(data['avg_views'])} · "
                 f"ER {data['er']:.1f}% · "
-                f"💰 ~{data['fair_price']:,}₽"
+                f"💰 ~${data['fair_price_usd']:,}"
             )
-            if asked_price:
-                verdict = get_price_verdict(asked_price, data['fair_price'])
-                line += f"\n   💬 Просят {asked_price:,}₽ — {verdict}"
+            if price_data:
+                asked, currency = price_data
+                display, verdict = get_price_verdict(asked, data['fair_price'], data['fair_price_usd'], currency)
+                line += f"\n   💬 Просят {display} — {verdict}"
             lines.append(line)
             valid.append(data)
 
