@@ -813,8 +813,10 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 line += f"\n   💬 Просят {display} — {verdict}"
                 asked_usd = asked if currency == 'usd' else asked / get_usd_rate()
                 data['effective_cpm_usd'] = asked_usd / max(data['avg_views'], 1) * 1000
+                data['has_asked_price'] = True
             else:
                 data['effective_cpm_usd'] = data['fair_price_usd'] / max(data['avg_views'], 1) * 1000
+                data['has_asked_price'] = False
             lines.append(line)
             valid.append(data)
 
@@ -822,9 +824,10 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(valid) > 1:
             lines.append("━━━━━━━━━━━━━━")
             best_er = max(valid, key=lambda d: d['er'])
-            best_cpm = min(valid, key=lambda d: d['effective_cpm_usd'])
             lines.append(f"🏆 Лучший ER: *@{best_er['username']}* ({best_er['er']:.1f}%)")
-            lines.append(f"💡 Лучшая цена за охват: *@{best_cpm['username']}* (~${int(best_cpm['effective_cpm_usd']):,} за 1000 просмотров)")
+            if any(d['has_asked_price'] for d in valid):
+                best_cpm = min(valid, key=lambda d: d['effective_cpm_usd'])
+                lines.append(f"💡 Лучшая цена за охват: *@{best_cpm['username']}* (~${int(best_cpm['effective_cpm_usd']):,} за 1000 просмотров)")
 
         result = "\n".join(lines)
         keyboard = []
