@@ -55,19 +55,20 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8649933614:AAG8yFnTGV-h4mf-0cOQKta-sWAD-y4UN
 ADMIN_ID = 587349420
 STARS_PRICE = 99  # Telegram Stars for 30 days
 
+# CPM в долларах за 1000 просмотров
 CPM_BY_NICHE = {
-    "arbitrage":     45000,   # $500 — арбитраж/трафик (реальные данные рынка)
-    "crypto":         1100,   # midpoint 700-1500 ₽ — крипто/web3
-    "finance":        1250,   # midpoint 800-1700 ₽ — финансы/инвестиции
-    "business":       1050,   # midpoint 700-1400 ₽ — бизнес
-    "it":              800,   # midpoint 500-1100 ₽ — IT/технологии
-    "education":       650,   # midpoint 400-900 ₽  — образование
-    "lifestyle":       575,   # midpoint 350-800 ₽  — лайфстайл/красота
-    "sport":           500,   # midpoint 300-700 ₽  — спорт
-    "gaming":          450,   # midpoint 250-650 ₽  — игры
-    "news":            425,   # midpoint 250-600 ₽  — новости
-    "entertainment":   350,   # midpoint 200-500 ₽  — развлечения/юмор
-    "default":         400,   # midpoint 200-600 ₽  — всё остальное
+    "arbitrage":     300,   # $300 — арбитраж/трафик
+    "crypto":         60,   # $60  — крипто/web3
+    "finance":        25,   # $25  — финансы/инвестиции
+    "sport":          20,   # $20  — спорт (беттинг-рекламодатели)
+    "business":       18,   # $18  — бизнес
+    "it":             14,   # $14  — IT/технологии
+    "education":       8,   # $8   — образование
+    "lifestyle":       7,   # $7   — лайфстайл/красота
+    "gaming":          6,   # $6   — игры
+    "default":         5,   # $5   — всё остальное
+    "news":            4,   # $4   — новости
+    "entertainment":   3,   # $3   — развлечения/юмор
 }
 
 NICHE_LABELS = {
@@ -338,8 +339,12 @@ def get_post_views(username: str) -> tuple:
     return views, dates, posts_text
 
 def calculate_fair_price(avg_views: float, niche: str) -> tuple:
-    cpm = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
-    return int(avg_views * cpm / 1000), cpm
+    """Возвращает (fair_rub, fair_usd, cpm_usd)"""
+    cpm_usd = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
+    usd_rate = get_usd_rate()
+    fair_usd = int(avg_views * cpm_usd / 1000)
+    fair_rub = int(fair_usd * usd_rate)
+    return fair_rub, fair_usd, cpm_usd
 
 def parse_price_token(token: str):
     """Парсит токен цены. Возвращает (amount, 'usd'|'rub') или None.
@@ -418,8 +423,7 @@ async def analyze_one(username: str) -> dict:
         avg_views = sum(views) / len(views)
         er = (avg_views / members * 100) if members > 0 else 0
         niche = detect_niche(info["description"], info.get("title", ""), info.get("username", ""), posts_text)
-        fair_price, cpm = calculate_fair_price(avg_views, niche)
-        usd_rate = get_usd_rate()
+        fair_rub, fair_usd, cpm_usd = calculate_fair_price(avg_views, niche)
         posts_per_day = 0.0
         if len(dates) >= 2:
             try:
@@ -428,7 +432,7 @@ async def analyze_one(username: str) -> dict:
                 span_days = abs((d1 - d2).days) or 1
                 posts_per_day = len(dates) / span_days
             except: pass
-        save_channel_cache(username, members, avg_views, er, niche, fair_price, posts_per_day)
+        save_channel_cache(username, members, avg_views, er, niche, fair_rub, posts_per_day)
         return {
             "username": username,
             "members": members,
@@ -436,8 +440,8 @@ async def analyze_one(username: str) -> dict:
             "er": er,
             "er_status": get_er_status(er),
             "niche": niche,
-            "fair_price": fair_price,
-            "fair_price_usd": int(fair_price / usd_rate),
+            "fair_price": fair_rub,
+            "fair_price_usd": fair_usd,
             "posts_per_day": posts_per_day,
             "no_views": False,
             "error": None,
