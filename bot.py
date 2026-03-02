@@ -545,6 +545,12 @@ def get_er_status(er: float) -> str:
     if er >= 5:  return "🟠 Средний"
     return "🔴 Низкий"
 
+def get_quality_verdict(er: float) -> str:
+    if er >= 20: return "🏆 *ОТЛИЧНЫЙ КАНАЛ* — ER выше нормы, аудитория живая"
+    if er >= 10: return "✅ *ХОРОШИЙ КАНАЛ* — ER в норме, можно брать рекламу"
+    if er >= 5:  return "🟡 *СРЕДНИЙ КАНАЛ* — ER ниже среднего, смотри на нишу"
+    return "⚠️ *СЛАБЫЙ КАНАЛ* — низкий ER, возможна накрутка аудитории"
+
 def fmt_num(n: float) -> str:
     if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
     if n >= 1000: return f"{n/1000:.0f}K"
@@ -768,6 +774,8 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 *Справедливая цена поста:*\n"
             f"   ~{data['fair_price']:,} ₽ (~${data['fair_price_usd']:,})\n"
             f"📌 Ниша: {NICHE_LABELS.get(data['niche'], 'Общая')}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"{get_quality_verdict(data['er'])}\n"
         )
         if price_data:
             asked, currency = price_data
