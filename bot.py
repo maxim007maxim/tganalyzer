@@ -341,9 +341,28 @@ def calculate_fair_price(avg_views: float, niche: str) -> tuple:
     cpm = CPM_BY_NICHE.get(niche, CPM_BY_NICHE["default"])
     return int(avg_views * cpm / 1000), cpm
 
+def parse_price_token(token: str) -> int | None:
+    """Парсит токен цены: '100', '100$', '$100', '100₽', '₽100', '100 usd' и т.п.
+    Возвращает цену в рублях или None если не похоже на цену.
+    """
+    t = token.strip().replace(',', '').replace(' ', '')
+    # Определяем валюту и извлекаем число
+    is_usd = False
+    # Убираем символы валюты с любой стороны
+    t_clean = re.sub(r'[$₽\$]|руб\.?|rub\.?|usd\.?', '', t, flags=re.IGNORECASE).strip()
+    if not re.match(r'^\d+$', t_clean):
+        return None
+    amount = int(t_clean)
+    # Проверяем была ли валюта долларом
+    if re.search(r'[$]|usd', t, re.IGNORECASE):
+        is_usd = True
+    if is_usd:
+        return int(amount * get_usd_rate())
+    return amount
+
 def parse_channels_from_text(text: str) -> list:
-    """Парсит список (username, asked_price|None) из сообщения.
-    Поддерживает: @ch1 50000 @ch2 @ch3 30000  /  t.me/ch1 50000
+    """Парсит список (username, asked_price_rub|None) из сообщения.
+    Поддерживает: @ch1 50000 / @ch1 100$ / $100 @ch1 / @ch1 100₽ / t.me/ch1 100$
     """
     results = []
     # Нормализуем t.me/ → @
@@ -358,9 +377,8 @@ def parse_channels_from_text(text: str) -> list:
             if len(username) >= 4:
                 price = None
                 if i + 1 < len(tokens):
-                    next_tok = re.sub(r'[,\s]', '', tokens[i + 1])
-                    if re.match(r'^\d+$', next_tok):
-                        price = int(next_tok)
+                    price = parse_price_token(tokens[i + 1])
+                    if price is not None:
                         i += 1
                 results.append((username, price))
         i += 1
