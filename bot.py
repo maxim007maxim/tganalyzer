@@ -273,8 +273,59 @@ def extract_username(text: str):
         return text
     return None
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL   = "llama-3.1-8b-instant"
+
+NICHE_KEYS_STR = ", ".join(CPM_BY_NICHE.keys())
+
+def classify_niche_llm(description: str, title: str, username: str, posts_text: str) -> str | None:
+    """Определяет нишу через Groq LLM. Возвращает ключ ниши или None при ошибке."""
+    if not GROQ_API_KEY:
+        return None
+    prompt = (
+        f"Ты классификатор Telegram-каналов. Определи нишу канала по его данным.\n\n"
+        f"Название: {title}\n"
+        f"Username: @{username}\n"
+        f"Описание: {description}\n"
+        f"Примеры постов:\n{posts_text[:1500]}\n\n"
+        f"Доступные ниши: {NICHE_KEYS_STR}\n\n"
+        f"Ответь ТОЛЬКО одним словом — ключом ниши из списка выше. Никаких объяснений."
+    )
+    body = json.dumps({
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 20,
+        "temperature": 0,
+    }).encode()
+    req = urllib.request.Request(
+        GROQ_API_URL,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            result = json.loads(r.read())
+        key = result["choices"][0]["message"]["content"].strip().lower().strip('"\'')
+        if key in CPM_BY_NICHE:
+            return key
+        logger.warning(f"LLM returned unknown niche key: {key!r}")
+    except Exception as e:
+        logger.warning(f"Groq classify failed: {e}")
+    return None
+
+
 def detect_niche(description: str, title: str = "", username: str = "", posts_text: str = "") -> str:
-    # Ищем по описанию + названию + username + текстам постов
+    # Сначала пробуем LLM — если есть ключ и не упало
+    llm_result = classify_niche_llm(description, title, username, posts_text)
+    if llm_result:
+        logger.info(f"Niche via LLM: {llm_result}")
+        return llm_result
+    # Fallback: keyword matching
     text = f"{description} {title} {username} {posts_text}".lower()
     for niche, keywords in NICHE_KEYWORDS.items():
         for kw in keywords:
