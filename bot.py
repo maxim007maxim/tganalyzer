@@ -477,8 +477,15 @@ def get_price_verdict(asked: int, fair_rub: int, fair_usd: int, currency: str) -
 async def analyze_one(username: str) -> dict:
     """Анализирует один канал, возвращает dict с данными или {'error': ...}"""
     try:
-        info = get_channel_info(username, BOT_TOKEN)
-        views, dates, posts_text = get_post_views(username)
+        loop = asyncio.get_event_loop()
+        # Run blocking I/O in thread pool so the event loop isn't frozen
+        info, (views, dates, posts_text) = await asyncio.wait_for(
+            asyncio.gather(
+                loop.run_in_executor(None, lambda: get_channel_info(username, BOT_TOKEN)),
+                loop.run_in_executor(None, lambda: get_post_views(username)),
+            ),
+            timeout=20.0
+        )
         if not views:
             return {
                 "username": username,
@@ -512,6 +519,9 @@ async def analyze_one(username: str) -> dict:
             "no_views": False,
             "error": None,
         }
+    except asyncio.TimeoutError:
+        logger.warning(f"analyze_one @{username}: timeout after 20s")
+        return {"username": username, "error": "⏱ Анализ занял слишком долго. Канал может быть недоступен — попробуй ещё раз."}
     except ValueError as e:
         return {"username": username, "error": str(e)}
     except Exception as e:
