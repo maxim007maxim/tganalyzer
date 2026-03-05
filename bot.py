@@ -819,7 +819,15 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("📤 Поделиться результатом", url=share_url)]]
         if not is_premium(user_id):
             keyboard.append([InlineKeyboardButton(f"⚡ Безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
-        await msg.edit_text(result, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        try:
+            await msg.edit_text(result, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception:
+            plain = re.sub(r'[*_`\[\]]', '', result)
+            try:
+                await msg.edit_text(plain, reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception as e:
+                logger.error(f"edit_text single fallback failed: {e}")
+                await msg.edit_text("❌ Ошибка при форматировании результата.")
 
     # ── НЕСКОЛЬКО КАНАЛОВ ────────────────────────────────────────
     else:
@@ -870,10 +878,22 @@ async def analyze_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         if not is_premium(user_id):
             keyboard.append([InlineKeyboardButton(f"⚡ Безлимит — {STARS_PRICE} ⭐", callback_data="buy")])
-        await msg.edit_text(
-            result, parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
-        )
+        try:
+            await msg.edit_text(
+                result, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+            )
+        except Exception:
+            # Fallback: plain text if Markdown parsing fails
+            plain = re.sub(r'[*_`\[\]]', '', result)
+            try:
+                await msg.edit_text(
+                    plain,
+                    reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+                )
+            except Exception as e:
+                logger.error(f"edit_text fallback failed: {e}")
+                await msg.edit_text("❌ Ошибка при форматировании результата.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
