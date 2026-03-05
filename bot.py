@@ -421,13 +421,18 @@ def parse_price_token(token: str):
     Без символа или с $ → доллары.
     С ₽ / руб / рублей → рубли.
     """
-    t = token.strip().replace(',', '')
-    is_rub = bool(re.search(r'[₽]|руб|рублей', t, re.IGNORECASE))
-    t_clean = re.sub(r'[$₽]|руб\.?|рублей|usd\.?|rub\.?', '', t, flags=re.IGNORECASE).strip()
+    t = token.strip().replace(',', '').replace(' ', '')
+    # Check rub BEFORE stripping — order matters: рублей before руб
+    is_rub = bool(re.search(r'[₽]|рублей|рубл|руб', t, re.IGNORECASE))
+    is_usd = bool(re.search(r'[$]|usd\.?|доллар', t, re.IGNORECASE))
+    # Strip currency markers — longer patterns first to avoid partial matches
+    t_clean = re.sub(r'рублей|рубля|рублю|рубль|рублями|рублях|рубл|руб\.?|[$₽]|usd\.?|rub\.?|доллар\w*', '', t, flags=re.IGNORECASE).strip()
     if not re.match(r'^\d+$', t_clean):
         return None
     amount = int(t_clean)
-    return (amount, 'rub') if is_rub else (amount, 'usd')
+    if is_rub:
+        return (amount, 'rub')
+    return (amount, 'usd')
 
 def parse_channels_from_text(text: str) -> list:
     """Парсит список (username, amount, currency) из сообщения.
