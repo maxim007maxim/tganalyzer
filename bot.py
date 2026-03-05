@@ -1,5 +1,6 @@
 import asyncio
 import re
+import socket
 import urllib.request
 import urllib.parse
 import json
@@ -8,6 +9,9 @@ import logging
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, timedelta
+
+# Hard socket timeout — applies to ALL urllib calls in ALL threads
+socket.setdefaulttimeout(8)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
